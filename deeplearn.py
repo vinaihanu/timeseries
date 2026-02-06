@@ -1,219 +1,300 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import yfinance as yf
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+
+from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
 from statsmodels.tsa.arima.model import ARIMA
-import math
-import warnings
-warnings.filterwarnings("ignore")
 
-# ======================
-# 1. Data Loading
-# ======================
-def load_financial_data(ticker="AAPL", start="2020-01-01", end="2023-01-01", features=None):
-    df = yf.download(ticker, start=start, end=end)
-    if features is None:
-        features = ["Open", "High", "Low", "Close", "Volume"]
-    data = df[features].fillna(method='ffill').values
-    return data
 
-# ======================
-# 2. Dataset Class
-# ======================
+# ===============================
+# Data Generation & Preprocessing
+# ===============================
+
+def generate_multivariate_time_series(
+    n_steps: int = 1500,
+    n_features: int = 5,
+    noise_std: float = 0.1
+) -> pd.DataFrame:
+    """
+    Generates a synthetic multivariate time series with nonlinear interactions.
+
+    Returns:
+        pd.DataFrame: shape (n_steps, n_features)
+    """
+    t = np.arange(n_steps)
+
+    data = []
+    for i in range(n_features):
+        signal = (
+            np.sin(0.01 * t * (i + 1)) +
+            np.cos(0.015 * t * (i + 2)) +
+            np.random.normal(0, noise_std, size=n_steps)
+        )
+        data.append(signal)
+
+    data = np.vstack(data).T
+    columns = [f"feature_{i}" for i in range(n_features)]
+    return pd.DataFrame(data, columns=columns)
+
+
 class TimeSeriesDataset(Dataset):
     """
-    Dataset for sequence-to-sequence forecasting.
-    Inputs:
-        data: np.array, shape (n_samples, n_features)
-        seq_len: input sequence length
-        pred_len: prediction length
+    Sliding-window dataset for sequence-to-sequence forecasting.
     """
-    def __init__(self, data, seq_len=30, pred_len=1):
-        self.data = data
-        self.seq_len = seq_len
-        self.pred_len = pred_len
-        self.X, self.y = self.create_sequences(data, seq_len, pred_len)
 
-    def create_sequences(self, data, seq_len, pred_len):
-        X, y = [], []
-        for i in range(len(data) - seq_len - pred_len + 1):
-            X.append(data[i:i+seq_len])
-            y.append(data[i+seq_len:i+seq_len+pred_len])
-        return torch.FloatTensor(X), torch.FloatTensor(y)
+    def __init__(self, data: np.ndarray, input_len: int, output_len: int):
+        self.data = data
+        self.input_len = input_len
+        self.output_len = output_len
 
     def __len__(self):
-        return len(self.X)
+        return len(self.data) - self.input_len - self.output_len
 
     def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+        x = self.data[idx:idx + self.input_len]
+        y = self.data[idx + self.input_len:idx + self.input_len + self.output_len]
+        return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
-# ======================
-# 3. Attention Mechanism
-# ======================
+
+# ===============================
+# Attention Mechanism
+# ===============================
+
 class SelfAttention(nn.Module):
     """
-    Self-Attention layer for sequence-to-sequence forecasting.
+    Scaled dot-product self-attention layer.
     """
-    def __init__(self, input_dim, attention_dim):
-        super(SelfAttention, self).__init__()
-        self.query = nn.Linear(input_dim, attention_dim)
-        self.key = nn.Linear(input_dim, attention_dim)
-        self.value = nn.Linear(input_dim, attention_dim)
-        self.softmax = nn.Softmax(dim=1)
+
+    def __init__(self, hidden_dim: int):
+        super().__init__()
+        self.query = nn.Linear(hidden_dim, hidden_dim)
+        self.key = nn.Linear(hidden_dim, hidden_dim)
+        self.value = nn.Linear(hidden_dim, hidden_dim)
+        self.scale = np.sqrt(hidden_dim)
+
+    def forward(self, encoder_outputs):
+        """
+        Args:
+            encoder_outputs: (batch, seq_len, hidden_dim)
+        """
+        Q = self.query(encoder_outputs)
+        K = self.key(encoder_outputs)
+        V = self.value(encoder_outputs)
+
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale
+        attention_weights = torch.softmax(scores, dim=-1)
+
+        context = torch.matmul(attention_weights, V)
+        return context, attention_weights
+
+
+# ===============================
+# Seq2Seq Model with Attention
+# ===============================
+
+class Seq2SeqAttentionModel(nn.Module):
+    """
+    Encoder-Decoder LSTM with self-attention.
+    """
+
+    def __init__(self, n_features, hidden_dim, output_len):
+        super().__init__()
+
+        self.encoder = nn.LSTM(
+            input_size=n_features,
+            hidden_size=hidden_dim,
+            batch_first=True
+        )
+
+        self.attention = SelfAttention(hidden_dim)
+
+        self.decoder = nn.LSTM(
+            input_size=hidden_dim,
+            hidden_size=hidden_dim,
+            batch_first=True
+        )
+
+        self.fc = nn.Linear(hidden_dim, n_features)
+        self.output_len = output_len
 
     def forward(self, x):
-        # x: (batch, seq_len, input_dim)
-        Q = self.query(x)
-        K = self.key(x)
-        V = self.value(x)
-        scores = torch.bmm(Q, K.transpose(1,2)) / math.sqrt(Q.size(-1))  # (batch, seq_len, seq_len)
-        weights = self.softmax(scores)
-        out = torch.bmm(weights, V)  # (batch, seq_len, attention_dim)
-        return out, weights
+        encoder_outputs, _ = self.encoder(x)
+        context, attention_weights = self.attention(encoder_outputs)
 
-# ======================
-# 4. Seq2Seq Model with Attention
-# ======================
-class Seq2SeqAttention(nn.Module):
+        decoder_input = context[:, -1:, :].repeat(1, self.output_len, 1)
+        decoder_outputs, _ = self.decoder(decoder_input)
+
+        output = self.fc(decoder_outputs)
+        return output, attention_weights
+
+
+# ===============================
+# Baseline LSTM Model
+# ===============================
+
+class StandardLSTM(nn.Module):
     """
-    Encoder-Decoder LSTM with Attention.
+    Simple LSTM baseline without attention.
     """
-    def __init__(self, input_dim, hidden_dim=64, attention_dim=32, num_layers=1, pred_len=1):
-        super(Seq2SeqAttention, self).__init__()
-        self.encoder = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
-        self.attention = SelfAttention(hidden_dim, attention_dim)
-        self.decoder = nn.LSTM(attention_dim, hidden_dim, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, input_dim)
-        self.pred_len = pred_len
+
+    def __init__(self, n_features, hidden_dim, output_len):
+        super().__init__()
+        self.lstm = nn.LSTM(n_features, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, n_features)
+        self.output_len = output_len
 
     def forward(self, x):
-        # Encoder
-        enc_out, (h, c) = self.encoder(x)
-        # Attention
-        attn_out, attn_weights = self.attention(enc_out)
-        # Decoder
-        dec_out, _ = self.decoder(attn_out)
-        # Prediction: take last pred_len steps
-        out = self.fc(dec_out[:, -self.pred_len:, :])
-        return out, attn_weights
+        _, (h_n, _) = self.lstm(x)
+        h = h_n[-1].unsqueeze(1).repeat(1, self.output_len, 1)
+        return self.fc(h)
 
-# ======================
-# 5. Training Function
-# ======================
-def train_model(model, train_loader, epochs=50, lr=1e-3):
+
+# ===============================
+# Training & Evaluation Utilities
+# ===============================
+
+def train_model(model, dataloader, epochs=20, lr=1e-3):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
+
     model.train()
     for epoch in range(epochs):
-        total_loss = 0
-        for X_batch, y_batch in train_loader:
+        total_loss = 0.0
+        for x, y in dataloader:
             optimizer.zero_grad()
-            pred, _ = model(X_batch)
-            loss = criterion(pred, y_batch)
+            preds = model(x)
+            preds = preds[0] if isinstance(preds, tuple) else preds
+            loss = criterion(preds, y)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(train_loader):.4f}")
-    return model
 
-# ======================
-# 6. Evaluation
-# ======================
-def evaluate_model(model, test_loader):
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(dataloader):.4f}")
+
+
+def evaluate_model(model, dataloader) -> Tuple[float, float]:
     model.eval()
-    preds, trues = [], []
-    attention_weights = []
+    preds_all, targets_all = [], []
+
     with torch.no_grad():
-        for X_batch, y_batch in test_loader:
-            pred, attn = model(X_batch)
-            preds.append(pred.numpy())
-            trues.append(y_batch.numpy())
-            attention_weights.append(attn.numpy())
-    preds = np.vstack(preds)
-    trues = np.vstack(trues)
-    
-    # Reshape preds and trues to 2D arrays for sklearn metrics
-    num_samples = preds.shape[0]
-    preds = preds.reshape(num_samples, -1)
-    trues = trues.reshape(num_samples, -1)
+        for x, y in dataloader:
+            preds = model(x)
+            preds = preds[0] if isinstance(preds, tuple) else preds
+            preds_all.append(preds.numpy())
+            targets_all.append(y.numpy())
 
-    rmse = np.sqrt(mean_squared_error(trues, preds))
-    mape = mean_absolute_percentage_error(trues, preds)
-    return preds, trues, attention_weights, rmse, mape
+    preds_all = np.concatenate(preds_all)
+    targets_all = np.concatenate(targets_all)
 
-# ======================
-# 7. Baseline: ARIMA
-# ======================
-def arima_baseline(data, pred_len=1):
-    # Univariate baseline: last feature
-    series = data[:, -1]  # e.g., Close price
-    train_size = int(len(series) * 0.8)
-    train, test = series[:train_size], series[train_size:]
-    history = list(train)
-    predictions = []
-    for t in range(len(test)):
-        model = ARIMA(history, order=(5,1,0))
-        model_fit = model.fit()
-        yhat = model_fit.forecast(steps=pred_len)[0]
-        predictions.append(yhat)
-        history.append(test[t])
-    predictions = np.array(predictions).reshape(-1,1)
-    rmse = np.sqrt(mean_squared_error(test.reshape(-1,1), predictions))
-    mape = mean_absolute_percentage_error(test.reshape(-1,1), predictions)
-    return predictions, rmse, mape
+    rmse = np.sqrt(mean_squared_error(targets_all.flatten(), preds_all.flatten()))
+    mape = mean_absolute_percentage_error(targets_all.flatten(), preds_all.flatten())
+    return rmse, mape
 
-# ======================
-# 8. Main Script
-# ======================
-if __name__ == "__main__":
-    # Load data
-    data = load_financial_data(ticker="AAPL")
-    scaler = StandardScaler()
-    data_scaled = scaler.fit_transform(data)
 
-    # Train-test split
-    split = int(len(data_scaled)*0.8)
-    train_data = data_scaled[:split]
-    test_data = data_scaled[split:]
+# ===============================
+# Attention Visualization
+# ===============================
 
-    seq_len = 30
-    pred_len = 1
-    batch_size = 32
+def plot_attention_weights(attention_weights):
+    """
+    Visualizes attention heatmap for one sample.
+    """
+    # Fix: Removed .mean(axis=0) as imshow expects a 2D array for the heatmap
+    weights = attention_weights[0].detach().numpy()
 
-    train_dataset = TimeSeriesDataset(train_data, seq_len, pred_len)
-    test_dataset = TimeSeriesDataset(test_data, seq_len, pred_len)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-    # Initialize and train Seq2SeqAttention
-    input_dim = data.shape[1]
-    model = Seq2SeqAttention(input_dim=input_dim)
-    model = train_model(model, train_loader, epochs=20, lr=0.001)
-
-    # Evaluate
-    preds, trues, attn_weights, rmse, mape = evaluate_model(model, test_loader)
-    print(f"Attention Model RMSE: {rmse:.4f}, MAPE: {mape:.4f}")
-
-    # Plot attention weights for first batch
-    plt.figure(figsize=(8,6))
-    plt.imshow(attn_weights[0][0], cmap='viridis', aspect='auto')
-    plt.colorbar()
-    plt.title("Attention Weights (First Sample)")
+    plt.figure(figsize=(8, 4))
+    plt.imshow(weights, aspect="auto", cmap="viridis")
+    plt.colorbar(label="Attention Weight")
     plt.xlabel("Historical Time Steps")
-    plt.ylabel("Sequence Step")
+    plt.ylabel("Query Time Step")
+    plt.title("Self-Attention Weight Visualization")
+    plt.tight_layout()
     plt.show()
 
-    # Baseline: ARIMA
-    arima_pred, arima_rmse, arima_mape = arima_baseline(data_scaled)
-    print(f"ARIMA RMSE: {arima_rmse:.4f}, MAPE: {arima_mape:.4f}")
-     
+
+# ===============================
+# ARIMA Baseline
+# ===============================
+
+def arima_baseline(series: np.ndarray, order=(5, 1, 0)):
+    model = ARIMA(series, order=order)
+    model_fit = model.fit()
+    return model_fit
 
 
+# ===============================
+# Main Execution
+# ===============================
+
+def main():
+    # Hyperparameters
+    INPUT_LEN = 30
+    OUTPUT_LEN = 10
+    HIDDEN_DIM = 64
+    BATCH_SIZE = 32
+    EPOCHS = 15
+
+    # Data
+    df = generate_multivariate_time_series()
+    data = df.values
+
+    train_data = data[:1200]
+    test_data = data[1200:]
+
+    train_ds = TimeSeriesDataset(train_data, INPUT_LEN, OUTPUT_LEN)
+    test_ds = TimeSeriesDataset(test_data, INPUT_LEN, OUTPUT_LEN)
+
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE)
+
+    # Models
+    attention_model = Seq2SeqAttentionModel(
+        n_features=data.shape[1],
+        hidden_dim=HIDDEN_DIM,
+        output_len=OUTPUT_LEN
+    )
+
+    lstm_model = StandardLSTM(
+        n_features=data.shape[1],
+        hidden_dim=HIDDEN_DIM,
+        output_len=OUTPUT_LEN
+    )
+
+    print("\nTraining Attention-Based Seq2Seq Model")
+    train_model(attention_model, train_loader, EPOCHS)
+
+    print("\nTraining Standard LSTM Baseline")
+    train_model(lstm_model, train_loader, EPOCHS)
+
+    # Evaluation
+    att_rmse, att_mape = evaluate_model(attention_model, test_loader)
+    lstm_rmse, lstm_mape = evaluate_model(lstm_model, test_loader)
+
+    print("\nEvaluation Results")
+    print(f"Attention Model  RMSE: {att_rmse:.4f}, MAPE: {att_mape:.4f}")
+    print(f"Standard LSTM   RMSE: {lstm_rmse:.4f}, MAPE: {lstm_mape:.4f}")
+
+    # Attention Visualization
+    x_sample, _ = next(iter(test_loader))
+    _, att_weights = attention_model(x_sample)
+    plot_attention_weights(att_weights)
+
+    # ARIMA baseline (single feature)
+    arima_model = arima_baseline(train_data[:, 0])
+    forecast = arima_model.forecast(steps=len(test_data))
+    rmse_arima = np.sqrt(mean_squared_error(test_data[:, 0], forecast))
+    print(f"ARIMA Baseline RMSE (feature_0): {rmse_arima:.4f}")
+
+
+if __name__ == "__main__":
+    main()
+
+   
 
 
 
