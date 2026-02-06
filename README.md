@@ -1,203 +1,178 @@
-# timeseries
-##  Advanced Time Series Forecasting with Deep Learning and Attention Mechanisms
-Project Overview
+# Advanced Time Series Forecasting with Seq2Seq Attention
 
-This project focuses on advanced multivariate time series forecasting using deep learning techniques, with a particular emphasis on attention mechanisms to improve predictive performance and interpretability. A Sequence-to-Sequence (Seq2Seq) architecture based on LSTM networks is implemented and augmented with a custom self-attention layer to allow the model to dynamically focus on the most relevant historical time steps when making future predictions.
+This project implements an **advanced multivariate time series forecasting pipeline** using deep learning with a **Sequence-to-Sequence (Seq2Seq) LSTM architecture augmented by a custom self-attention mechanism**. The implementation also includes strong baseline models (Standard LSTM and ARIMA) and emphasizes **model interpretability through attention weight visualization**.
 
-The attention-based model is rigorously evaluated against simpler baseline models, including a standard LSTM and a classical ARIMA model, using both quantitative metrics and qualitative analysis of learned attention weights.
+The code is written as a **single, production-quality Python file**, suitable for advanced coursework or research-oriented experimentation.
 
-# Objectives
+---
 
-Implement a production-quality Seq2Seq deep learning model with self-attention
+## 📌 Project Objectives
 
-Forecast multivariate time series data with 1000+ observations and 5+ features
+* Build a multivariate time series forecasting system with **5+ features and 1000+ observations**
+* Implement a **custom self-attention mechanism** on top of an encoder–decoder LSTM
+* Compare performance against simpler baselines (Standard LSTM, ARIMA)
+* Go beyond numerical metrics by **interpreting learned attention weights**
+* Deliver clean, modular, and well-documented code
 
-Compare attention-based forecasting with traditional and deep learning baselines
+---
 
-Interpret and visualize attention weights to explain model decisions
+## 📁 Project Structure
 
-Provide reproducible, well-documented, and object-oriented Python code
-
-Dataset Description
-Data Source
-
-Source: Financial time series data retrieved using the yfinance library
-
-Example Ticker: AAPL (Apple Inc.)
-
-Time Period: 2020–2023
-
-Frequency: Daily
-
-Features Used (Multivariate)
-
-Open Price
-
-High Price
-
-Low Price
-
-Close Price
-
-Trading Volume
-
-The dataset contains well over 1000 observations, satisfying the project requirement for complex real-world data.
-
-Preprocessing
-
-Missing values handled using forward fill
-
-Features normalized using StandardScaler
-
-Data split into 80% training and 20% testing
-
-Sliding window approach used for sequence-to-sequence forecasting
-
-Model Architecture
-1. Seq2Seq Encoder-Decoder
-
-Encoder: LSTM processes historical input sequences
-
-Decoder: LSTM generates future predictions
-
-Prediction Horizon: Configurable (default = 1 time step)
-
-2. Custom Self-Attention Mechanism
-
-The attention layer computes Query, Key, and Value projections from encoder outputs and learns attention weights that highlight which historical time steps are most influential for predictions.
-
-This allows the model to:
-
-Focus on relevant temporal patterns
-
-Improve interpretability
-
-Capture long-range dependencies
-
-Why Attention?
-
-Unlike standard LSTMs, attention mechanisms:
-
-Do not rely solely on the final hidden state
-
-Provide transparency into model decision-making
-
-Improve performance on noisy and complex sequences
-
-Baseline Models
-
-To ensure a rigorous evaluation, the following baselines are implemented:
-
-1. Standard LSTM (Without Attention)
-
-Same input and preprocessing
-
-Encoder-decoder architecture without attention
-
-Used to isolate the contribution of attention
-
-2. ARIMA (Classical Time Series Model)
-
-Univariate ARIMA applied to closing prices
-
-Acts as a traditional statistical benchmark
-
-Training Details
-
-Framework: PyTorch
-
-Optimizer: Adam
-
-Loss Function: Mean Squared Error (MSE)
-
-Batch Size: 32
-
-Sequence Length: 30
-
-Hyperparameters Tuned:
-
-Learning rate
-
-Hidden dimension
-
-Attention dimension
-
-Number of LSTM layers
-
-Evaluation Metrics
-
-The models are evaluated using:
-
-RMSE (Root Mean Squared Error)
-
-MAPE (Mean Absolute Percentage Error)
-
-These metrics assess both absolute error magnitude and relative prediction accuracy.
-
-Attention Weight Analysis
-
-A critical component of this project is the interpretation of attention weights.
-
-# Visualization
-
-Attention weight matrices are visualized as heatmaps
-
-Each row represents a prediction step
-
-Each column corresponds to a historical time step
-
-Interpretation
-
-The attention analysis reveals that:
-
-The model assigns higher weights to recent and high-volatility periods
-
-Sudden price changes receive increased attention
-
-The model dynamically adapts focus based on market conditions
-
-This confirms that the attention mechanism is learning meaningful temporal dependencies, rather than uniformly weighting past inputs.
-
-# Results Summary
-Model	RMSE ↓	MAPE ↓
-ARIMA	Higher	Higher
-Standard LSTM	Medium	Medium
-LSTM + Attention	Lowest	Lowest
-
-The attention-based model consistently outperforms baseline approaches, demonstrating improved accuracy and interpretability.
-
-# Project Structure
+```
 .
-├── main.py                 # Full implementation (single-file)
-├── README.md               # Project documentation
-├── loss_plot.png           # Training loss visualization
-├── attention_weights.png   # Attention heatmap
+├── attention_time_series_forecasting.py   # Main Python implementation
+├── README.md                              # Project documentation
+```
 
-How to Run
-Install Dependencies
-pip install torch numpy pandas matplotlib scikit-learn yfinance statsmodels
+All functionality (data generation, modeling, training, evaluation, visualization) is contained in **one Python file** as required.
 
-Execute
-python main.py
+---
 
-# Conclusion
+## 📊 Dataset Description
 
-This project demonstrates that attention-augmented deep learning models provide superior performance for complex time series forecasting tasks. Beyond improved accuracy, the attention mechanism offers valuable interpretability by revealing how historical data influences predictions.
+The dataset is **synthetically generated** to simulate complex real-world behavior:
 
-The results validate the effectiveness of combining Seq2Seq architectures with self-attention for real-world, noisy, multivariate time series.
+* **1500 time steps**
+* **5 continuous features**
+* Nonlinear dynamics using sine and cosine waves
+* Additive Gaussian noise for realism
 
-Future Work
+Each feature is generated as:
 
-Multi-step forecasting (longer horizons)
+* A combination of sinusoids with different frequencies
+* Independent noise injection
 
-Multi-head attention
+This design ensures:
 
-Transformer-based architectures
+* Temporal dependencies
+* Cross-feature variability
+* Suitability for attention-based modeling
 
-Explainability comparisons with SHAP or Integrated Gradients
+---
 
-Author
+## 🧠 Model Architectures
 
-Deepa
+### 1. Seq2Seq LSTM with Self-Attention (Primary Model)
 
+**Architecture:**
+
+* Encoder: LSTM processes historical input window
+* Self-Attention: Learns importance of historical time steps
+* Decoder: LSTM generates multi-step forecasts
+* Fully Connected Layer: Maps hidden states to output features
+
+**Key Advantage:**
+
+The attention mechanism provides **interpretability**, allowing inspection of which past time steps influence future predictions.
+
+---
+
+### 2. Standard LSTM (Baseline)
+
+* Single LSTM encoder
+* No attention mechanism
+* Uses final hidden state for forecasting
+
+Used to quantify performance gains from attention.
+
+---
+
+### 3. ARIMA (Baseline)
+
+* Classical statistical model
+* Applied to a **single feature only**
+* Serves as a traditional forecasting benchmark
+
+---
+
+## ⚙️ Training Configuration
+
+| Parameter        | Value |
+| ---------------- | ----- |
+| Input Length     | 30    |
+| Output Horizon   | 10    |
+| Hidden Dimension | 64    |
+| Batch Size       | 32    |
+| Epochs           | 15    |
+| Optimizer        | Adam  |
+| Loss Function    | MSE   |
+
+---
+
+## 📈 Evaluation Metrics
+
+The following metrics are computed on the test set:
+
+* **RMSE (Root Mean Squared Error)**
+* **MAPE (Mean Absolute Percentage Error)**
+
+All metrics are computed over **all features and forecast horizons** for deep learning models.
+
+---
+
+## 🔍 Attention Weight Interpretation
+
+The self-attention module produces a **(sequence × sequence)** attention matrix.
+
+Visualization highlights:
+
+* Rows: Query time steps
+* Columns: Historical encoder time steps
+* Color intensity: Attention strength
+
+This allows qualitative analysis such as:
+
+* Identifying critical historical windows
+* Observing periodic dependencies
+* Validating model focus during regime shifts
+
+---
+
+## ▶️ How to Run
+
+### 1. Install Dependencies
+
+```bash
+pip install numpy pandas matplotlib torch scikit-learn statsmodels
+```
+
+### 2. Execute the Script
+
+```bash
+python attention_time_series_forecasting.py
+```
+
+The script will:
+
+1. Generate the dataset
+2. Train all models
+3. Print evaluation metrics
+4. Display attention heatmaps
+
+---
+
+## ✅ Expected Outputs
+
+* Training loss per epoch
+* RMSE and MAPE for:
+
+  * Attention-based Seq2Seq model
+  * Standard LSTM baseline
+* ARIMA RMSE for one feature
+* Attention heatmap visualization
+
+---
+
+## 🚀 Possible Extensions
+
+* Multi-head attention
+* Transformer-based forecasting
+* Real-world datasets (e.g., stock prices via `yfinance`)
+* Probabilistic forecasting (quantile loss)
+* Hyperparameter optimization
+
+---
+## ✍️ Author
+
+**Deepa**
 Advanced Time Series Forecasting Project
