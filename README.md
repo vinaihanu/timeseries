@@ -138,7 +138,7 @@ Attention Weight Analysis
 
 A critical component of this project is the interpretation of attention weights.
 
-Visualization
+# Visualization
 
 Attention weight matrices are visualized as heatmaps
 
@@ -158,7 +158,7 @@ The model dynamically adapts focus based on market conditions
 
 This confirms that the attention mechanism is learning meaningful temporal dependencies, rather than uniformly weighting past inputs.
 
-Results Summary
+# Results Summary
 Model	RMSE ↓	MAPE ↓
 ARIMA	Higher	Higher
 Standard LSTM	Medium	Medium
@@ -166,7 +166,7 @@ LSTM + Attention	Lowest	Lowest
 
 The attention-based model consistently outperforms baseline approaches, demonstrating improved accuracy and interpretability.
 
-Project Structure
+# Project Structure
 .
 ├── main.py                 # Full implementation (single-file)
 ├── README.md               # Project documentation
@@ -180,7 +180,7 @@ pip install torch numpy pandas matplotlib scikit-learn yfinance statsmodels
 Execute
 python main.py
 
-Conclusion
+# Conclusion
 
 This project demonstrates that attention-augmented deep learning models provide superior performance for complex time series forecasting tasks. Beyond improved accuracy, the attention mechanism offers valuable interpretability by revealing how historical data influences predictions.
 
@@ -199,4 +199,5 @@ Explainability comparisons with SHAP or Integrated Gradients
 Author
 
 Deepa
+
 Advanced Time Series Forecasting Project
